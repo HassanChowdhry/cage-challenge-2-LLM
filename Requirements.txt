@@ -1,0 +1,12 @@
+gym-csle-cyborg==0.8.0
+gymnasium>=0.29
+torch>=2.2
+numpy>=1.26
+scipy>=1.11
+pandas>=2.0
+networkx>=3.1
+tqdm>=4.66
+tensorboard>=2.15
+tensorboardX>=2.6
+scikit-learn>=1.4
+matplotlib>=3.8
