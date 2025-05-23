@@ -1,43 +1,27 @@
-# taken from https://github.com/geekyutao/PyTorch-PPO/blob/master/PPO_discrete.py
+# modified from https://github.com/geekyutao/PyTorch-PPO/blob/master/PPO_discrete.py
 
-import torch
-import torch.nn as nn
+import torch, torch.nn as nn
 from torch.distributions import Categorical
-import numpy as np
-import os
-import argparse
-import gym
-from tensorboardX import SummaryWriter
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Memory:
-  def __init__(self):
-    self.states = []
-    self.actions = []
-    self.rewards = []
-    
-    self.is_terminals = []
-    self.logprobs = []
-    
-    self.hiddens = []
-    self.next_hiddens = []
-    self.next_states = []
-  
-  def clear_memory(self):
-    del self.states[:]
-    del self.actions[:]
-    del self.rewards[:]
-    del self.is_terminals[:]
-    del self.logprobs[:]
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.states, self.actions = [], []
+        self.rewards, self.is_terminals = [], []
+        self.logprobs = []
+        self.hiddens = []
 
 HIDDEN = 64 # size of GRU hidden state
 class RecurrentActorCritic(nn.Module):
-  def __init__(self, state_dime: int, action_dim: int):
+  def __init__(self, state_dim: int, action_dim: int):
     super(RecurrentActorCritic, self).__init__()
     
     self.encoder = nn.Sequential(
-      nn.Linear(state_dime, HIDDEN),
+      nn.Linear(state_dim, HIDDEN),
       nn.ReLU(),
     )
     
@@ -83,16 +67,15 @@ class RecurrentActorCritic(nn.Module):
     action_probs = self.actor(z)
     dist = Categorical(action_probs)
     
-    if deterministic: action = torch.argmax(action_probs, dim=1)
-    else: action = dist.sample()
+    action = torch.argmax(action_probs, dim=1) if deterministic else dist.sample()
     
     action_logp = dist.log_prob(action)
     
     if memory is not None:
-      memory.states.append(state)
-      memory.hiddens.append(hidden)
-      memory.actions.append(action)
-      memory.logprobs.append(action_logp)
+      memory.states.append(state.detach())
+      memory.hiddens.append(hidden.detach())
+      memory.actions.append(action.detach())
+      memory.logprobs.append(action_logp.detach())
     
     if full: return action_probs, h_next
       
@@ -103,4 +86,13 @@ class RecurrentActorCritic(nn.Module):
     states  : (B,state_dim)
     hiddens : (1,B,HIDDEN)
     """
-    pass
+    z, _ = self.forward_core(states, hiddens)
+    
+    action_probs = self.actor(z)
+    dist = Categorical(action_probs)
+    
+    action_logprobs = dist.log_prob(actions)
+    dist_entropy = dist.entropy()
+    state_values = self.critic(z).squeeze(-1)
+    
+    return action_logprobs, state_values, dist_entropy

@@ -1,4 +1,4 @@
-gym-csle-cyborg==0.8.0
+CybORG
 gymnasium>=0.29
 torch>=2.2
 numpy>=1.26
