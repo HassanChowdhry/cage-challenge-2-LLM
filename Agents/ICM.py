@@ -18,8 +18,15 @@ class ICM(nn.Module):
     
     self.MSELoss = nn.MSELoss(reduction=None)
   
-  def forward(self, state, action_onehot):
-    phi = self.phi(state)
-    pred = self.fwd(torch.concat([phi.detach(), action_onehot], 1))
-    return self.MSELoss(pred, phi).mean(1)
+  def forward(
+    self, 
+    state_prev, # φ(s_t)
+    state_next, # φ(s_{t+1})  target
+    action_onehot # one-hot action at t
+  ):
+    phi_prev = self.phi(state_prev).detach()
+    phi_next = self.phi(state_next)
+    
+    pred = self.fwd(torch.cat([phi_prev, action_onehot], 1))
+    return self.MSELoss(pred, phi_next).mean(1)
   # if we find feature collapse, add inverse head to help phi learn controllable aspects
