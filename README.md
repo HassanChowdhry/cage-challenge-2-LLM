@@ -1,9 +1,15 @@
 # PPO Baseline
 
-This repository contains a minimal implementation of a recurrent PPO agent. The
-agent (`Agents/PPOAgent.py`) wraps a lightweight PPO algorithm located in
-`PPO/PPO.py` (adapted from the `PPO_discrete.py` example) and uses the network
-defined in `PPO/Recurrent_ActorCritic.py`.
+This repository contains a minimal implementation of a recurrent PPO agent. Two
+agent variants are provided:
+
+* **`Agents/PPOAgent.py`** – a basic wrapper around the lightweight PPO
+  algorithm located in `PPO/PPO.py` (adapted from the `PPO_discrete.py`
+  example).  It uses the network defined in `PPO/Recurrent_ActorCritic.py`.
+
+* **`Agents/PPOICMAgent.py`** – extends the base agent with an Intrinsic
+  Curiosity Module (ICM) to encourage exploration.  This demonstrates how the
+  template curiosity module can be integrated into the training loop.
 
 ## Intrinsic Curiosity Module
 
