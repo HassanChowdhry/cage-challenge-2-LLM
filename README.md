@@ -27,3 +27,18 @@ driven exploration:
 
 These steps allow you to extend the base agent with curiosity while keeping its
 core training loop simple.
+
+## LLM Agents
+
+The `LLM` package contains experimental agents that make decisions with large
+language models. Four strategies are provided:
+
+1. **OneShotAgent** – prompts an LLM for an action given the current state.
+2. **RAGAgent** – augments the prompt with recently observed transitions.
+3. **FinetunedAgent** – assumes the underlying model has been fine-tuned on
+   relevant data.
+4. **RAGFinetunedAgent** – combines retrieval augmented prompts with a
+   fine-tuned model.
+
+All agents log the observed state, chosen action and reward to a small SQLite
+database via `TrajectoryDatabase`.
