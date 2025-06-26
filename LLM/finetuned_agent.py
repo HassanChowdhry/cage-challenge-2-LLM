@@ -11,6 +11,7 @@ except Exception:  # pragma: no cover - optional dependency
     torch = None
 
 from .base import BaseLLMAgent
+from .langraph_utils import build_generation_graph
 
 
 def _load_default_model():
@@ -34,12 +35,20 @@ class FinetunedAgent(BaseLLMAgent):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
+        try:
+            self.graph = build_generation_graph(self.model, self.tokenizer, self.device)
+        except Exception:  # pragma: no cover - optional dependency
+            self.graph = None
 
     def get_action(self, observation, action_space=None, hidden=None):
         prompt = f"State: {observation}\nAction:"
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
-        output = self.model.generate(**inputs, max_new_tokens=1)
-        text = self.tokenizer.decode(output[0], skip_special_tokens=True)
+        if self.graph:
+            result = self.graph.invoke({"prompt": prompt})
+            text = result.get("action", "0")
+        else:
+            inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+            output = self.model.generate(**inputs, max_new_tokens=1)
+            text = self.tokenizer.decode(output[0], skip_special_tokens=True)
         try:
             return int(text.strip().split()[-1])
         except Exception:
