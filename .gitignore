@@ -1,0 +1,5 @@
+.venv
+tests/
+examples/
+.env
+Models/
