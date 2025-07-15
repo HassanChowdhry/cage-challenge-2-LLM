@@ -1,0 +1,6 @@
+llm: "gemini"
+model_name: "gemini-2.0-flash-lite"
+generate:
+  max_new_tokens: 32
+  max_length: 1024
+  temperature: 0.9

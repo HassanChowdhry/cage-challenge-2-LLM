@@ -1,239 +1,191 @@
 from typing import Dict, Any, List, Optional, TypedDict, Annotated
-import logging
+import logging, os, yaml, json
 from dataclasses import dataclass, field
 
+# from ray.rllib.policy.policy import Policy
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
 from CybORG.Agents import BaseAgent
 from CybORG.Shared.Results import Results
-from .base import BaseLLMAgent
-from .backends import LLMBackend, create_backend
-from .prompts import get_prompt_template
+
+from LLM.backend import LLMBackend, create_backend
+from LLM.configs.prompts import PROMPT_PATH
+from LLM.configs.utils import ConfigLoader
 
 # Base LLMAgent, backend_config, create_backend, _build_workflow_graph
 logger = logging.getLogger(__name__)
+base_path = os.path.dirname(__file__)
+base_prompt_path = os.path.join(base_path, "configs", "prompts", PROMPT_PATH)
+
+CAGE2_HOSTS = [
+    "User0", "User1", "User2", "Enterprise0", "Enterprise1", "Enterprise2", "Operational0"
+]
+CAGE2_ACTIONS = [
+    "Monitor",
+    "Analyse {host}",
+    "Remove {host}",
+    "Restore {host}",
+    "DecoyApache {host}",
+    "DecoyFemitter {host}",
+    "DecoyHarakaSMPT {host}",
+    "DecoySmss {host}",
+    "DecoySSHD {host}",
+    "DecoySvchost {host}",
+    "DecoyTomcat {host}"
+]
+
+def _build_action_mapping():
+    mapping = {"Monitor": 0}
+    idx = 1
+    for action in CAGE2_ACTIONS[1:]:
+        for host in CAGE2_HOSTS:
+            key = action.format(host=host)
+            mapping[key] = idx
+            idx += 1
+    return mapping
 
 @dataclass
 class BlueAgentState:
     messages: Annotated[List, add_messages] = field(default_factory=list)
     current_observation: str = ""
     history: List[str] = field(default_factory=list)
-    summary: str = ""
     raw_llm_output: str = ""
     selected_action: Any = None
     episode_step: int = 0
     action_mapping: Dict[str, int] = field(default_factory=dict)
 
-class LLMBlueAgent(BaseLLMAgent):    
+class LLMPolicy:
     def __init__(
         self,
-        backend_type: str = "gemini",
-        hyperparams: Dict[str, Any] = None,
-        prompt_name: str = "zero_shot",
-        max_history_length: int = 100,
+        observation_space, action_space, llm_config
     ):
-        self.backend = create_backend(backend_type)(hyperparams)
-        
-        # config
-        self.max_history_length = max_history_length
-        
-        self.prompt_name = prompt_name
-        self.prompt_template = get_prompt_template(prompt_name)
+        self.backend = create_backend(llm_config['llm'], llm_config['hyperparams'])
         
         # CAGE Challenge 2 Specific Things
-        self.action_mapping = self._build_action_mapping()
+        self.action_mapping = _build_action_mapping()
         
         # LangGraph workflow
         self.graph = self._build_graph()
         self.state = BlueAgentState(action_mapping=self.action_mapping)
 
-    def _build_action_mapping(self) -> Dict[str, int]:
-        actions = []
-        hosts = ["User0", "User1", "User2", "Enterprise0", "Enterprise1", "Enterprise2", "Operational0"]
+    def get_action(self, observation, action_space=None, hidden=None):
+        obs_text = self._observation_to_text(observation)
+        self.state.current_observation = obs_text
+        self.state.episode_step += 1
         
-        # Spreads this into Action *host0* format
-        for host in hosts:
-            actions += [
-                f"Analyze {host}",
-                f"Remove {host}", 
-                f"Restore {host}",
-                f"Decoy {host}"
-            ]
-        # Puts it in Analyse *host*: 0,...
-        action_mapping = {action: idx for idx, action in enumerate(actions)}
-        return action_mapping
+        # Run the workflow graph
+        output_state = self.graph.invoke(self.state)
+        # logger.info(f"Output state type: {type(output_state)}")
+        # logger.info(f"Output state: {output_state}")
+        
+        # Return the selected action (index or string as required by CybORG)
+        if hasattr(output_state, 'selected_action'):
+            return output_state.selected_action
+        elif isinstance(output_state, dict) and 'selected_action' in output_state:
+            return output_state['selected_action']
+        else:
+            logger.error(f"Unexpected output state format: {output_state}")
+            return 0  # Default to Monitor action
+    
+    def end_episode(self):
+        self.state = BlueAgentState(action_mapping=self.action_mapping)
     
     def _build_graph(self):
         logger.info("Build LangGraph Agent")
 
-        graph = StateGraph(BlueAgentState)
+        workflow = StateGraph(BlueAgentState)
         
-        # Create Nodes in LangGraph
-        graph.add_node("format_prompt", self._format_prompt_node)
-        graph.add_node("call_llm", self._call_llm_node)
-        graph.add_node("parse_action", self._parse_action_node)
-        graph.add_node("update_state", self._update_state_node)
+        # Add nodes
+        workflow.add_node("format_prompt", self._format_prompt_node)
+        workflow.add_node("call_llm", self._call_llm_node)
+        workflow.add_node("parse_action", self._parse_action_node)
+        workflow.add_node("update_state", self._update_state_node)
+        
+        # Set entry point
+        workflow.set_entry_point("format_prompt")
         
         # Add edges
-        graph.set_entry_point("format_prompt")
-        graph.add_edge("format_prompt", "call_llm")
-        graph.add_edge("call_llm", "parse_action")
-        graph.add_edge("parse_action", "update_state")
-        graph.add_edge("update_state", END)
+        workflow.add_edge("format_prompt", "call_llm")
+        workflow.add_edge("call_llm", "parse_action")
+        workflow.add_edge("parse_action", "update_state")
+        workflow.add_edge("update_state", END)
         
         return workflow.compile()
     
-    def _format_prompt_node(self, state: BlueAgentState) -> Dict[str, Any]:
-        pass
-    
-    def _call_llm_node(self, state: BlueAgentState) -> Dict[str, Any]:
-        pass
+    def _format_prompt_node(self, state: BlueAgentState) -> BlueAgentState:
+        try:
+            prompts = ConfigLoader.load_prompts(base_prompt_path)
+            prompt_template = prompts[0]["content"] if prompts else ""
+        except Exception as e:
+            logger.error(f"Failed to load prompt template: {e}")
+            prompt_template = ""
             
+        # # Format the prompt
+        # prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
+        # if state.history:
+        #     prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        
+        # Update the current observation with the formatted prompt
+        prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
+        if state.history:
+            prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        state.current_observation = prompt
+        return state
     
-    def _parse_action_node(self, state: BlueAgentState) -> Dict[str, Any]:
-        pass
+    def _call_llm_node(self, state: BlueAgentState) -> BlueAgentState:
+        # Get the prompt from the format_prompt node
+        prompt = state.current_observation
+        try:
+            # Use the backend to generate a response
+            response = self.backend.generate(prompt)
+            logger.info("LLM response received")
+        except Exception as e:
+            logger.error(f"LLM backend error: {e}")
+            response = "{\"action\": \"Monitor\", \"reason\": \"Fallback action due to LLM error\"}"
+        
+        state.raw_llm_output = response
+        return state
+            
+    def _parse_action_node(self, state: BlueAgentState) -> BlueAgentState:
+        llm_output = state.raw_llm_output if state.raw_llm_output else ""
+        action = None
+        try:
+            parsed = json.loads(llm_output)
+            action_str = parsed.get("action", "Monitor")
+            # Map action string to action index if needed
+            action = self.action_mapping.get(action_str, 0)  # Default to 0 if not found
+        except Exception as e:
+            logger.error(f"Failed to parse LLM output: {e}")
+            action = 0  # Default to Monitor
+        
+        state.selected_action = action
+        return state
     
-    def _update_state_node(self, state: BlueAgentState, parsed_action_text: str) -> Dict[str, Any]:
-        step_ = f"Step {state.episode_step}: {parsed_action_text}"
-        state.history.append(step_)
-        
-        if len(state.history) > self.max_history_length:
-            state.history = state.history[-self.max_history_length:]
-        
-        recent_actions = state.history[-3:] if len(state.history) >= 3 else state.history
-        state.summary = "; ".join(recent_actions)
-        
-        state.episode_step += 1
-        
-        return {}
-    
-    def _observation_to_text(self, observation) -> str:
-        if isinstance(observation, str):
-            return observation
-        
-        if isinstance(observation, (list, tuple)):
-            return self._vector_observation_to_text(observation)
-        
-        if isinstance(observation, dict):
-            return self._dict_observation_to_text(observation)
-        
+    def _observation_to_text(self, observation):
+        # Convert numpy array to a more readable format
+        if hasattr(observation, 'tolist'):
+            return str(observation.tolist())
         return str(observation)
     
-    def _vector_observation_to_text(self, obs_vector) -> str:
-        # This should be customized based on the actual CAGE observation format
-        # For now I'll put a generic description
-        return f"Network observation vector with {len(obs_vector)} features"
-    
-    def _dict_observation_to_text(self, obs_dict) -> str:
-        alerts = []
-        for key, value in obs_dict.items():
-            if value and key.lower() in ['alert', 'compromise', 'malware', 'suspicious', 'detected']:
-                alerts.append(f"{key}: {value}")
+    def _update_state_node(self, state: BlueAgentState) -> BlueAgentState:
+        # Update history and state for next step
+        if state.raw_llm_output:
+            state.history.append(state.raw_llm_output)
+        return state
+
+class LLMAgent:
+    def __init__(self, name, policy, obs_space, llm_config):
+        self.policy = policy(obs_space, None, llm_config)
+        self.obs_space = obs_space
+        self.end_episode()
         
-        if alerts:
-            return "; ".join(alerts)
-        else:
-            return "No alerts detected"
-    
-    def get_action(self, observation, action_space=None, hidden=None):
-        obs_text = self._observation_to_text(observation)
-        self.state.current_observation = obs_text
-
-        logger.info(f"Invoke LangGraph")
-        result = self.graph.invoke(self.state)
-        action = result.selected_action
-
+    def get_action(self, observation, action_space=None):
+        action = self.policy.get_action(observation)
+        self.step += 1
         return action
     
-    def train(self, results: Results):
-        self._log_transition(results.observation, results.action, results.reward) # store transition
-    
     def end_episode(self):
-        self.state = BlueAgentState(action_mapping=self.action_mapping)
-        super().end_episode()
-    
-    def set_initial_values(self, action_space, observation):
-        pass
-    
-
-# def _call_llm_node(self, state: BlueAgentState) -> Dict[str, Any]:
-#     try:
-#         # Get the last message (should be the system message)
-#         if state.messages:
-#             last_message = state.messages[-1]
-#             prompt = last_message.content
-#         else:
-#             prompt = self.prompt_template.format(
-#                 summary=state.summary or "No previous actions",
-#                 observation=state.current_observation
-#             )
-        
-#         response = self.backend.generate(prompt)
-        
-#         ai_message = AIMessage(content=response)
-        
-#         return {"messages": [ai_message], "raw_llm_output": response}
-        
-#     except Exception as e:
-#         logger.error(f"LLM generation error: {e}")
-#         fallback_response = "Analyze User0"
-#         ai_message = AIMessage(content=fallback_response)
-#         return {"messages": [ai_message], "raw_llm_output": fallback_response}
-
-# def _format_prompt_node(self, state: BlueAgentState) -> Dict[str, Any]:
-#     [system_content = self.prompt_template.format(
-#         summary=state.summary or "No previous actions",
-#         observation=state.current_observation
-#     )
-    
-#     system_message = SystemMessage(content=system_content)
-    
-#     return {"messages": [system_message]}]
-
-# def _call_llm_node(self, state: BlueAgentState) -> Dict[str, Any]:
-
-#     # Get the last message (should be the system message)
-#     if state.messages:
-#         last_message = state.messages[-1]
-#         prompt = last_message.content
-#     else:
-#         prompt = self.prompt_template.format(
-#             summary=state.summary or "No previous actions",
-#             observation=state.current_observation
-#         )
-    
-#     response = self.backend.generate(prompt)
-    
-#     ai_message = AIMessage(content=response)
-    
-#     return {"messages": [ai_message], "raw_llm_output": response}
-
-# def _parse_action_node(self, state: BlueAgentState) -> Dict[str, Any]:
-#     if state.messages:
-#         ai_message = state.messages[-1]
-#         action_text = ai_message.content.strip()
-#     else:
-#         action_text = state.raw_llm_output.strip()
-    
-#     for action_name in self.action_mapping.keys():
-#         if action_name.lower() in action_text.lower():
-#             action_idx = self.action_mapping[action_name]
-#             return {"selected_action": action_idx, "parsed_action_text": action_name}
-    
-#     # If no exact match, try to parse common patterns
-#     words = action_text.split()
-#     if len(words) >= 2:
-#         action_type = words[0].capitalize()
-#         host_name = words[1]
-        
-#         # Try to find a matching action
-#         for action_name in self.action_mapping.keys():
-#             if action_name.startswith(action_type) and host_name in action_name:
-#                 action_idx = self.action_mapping[action_name]
-#                 return {"selected_action": action_idx, "parsed_action_text": action_name}
-    
-#     # Fallback
-#     logger.warning(f"Could not parse action from: {action_text}")
-#     return {"selected_action": 0, "parsed_action_text": "Analyze User0"}
+        self.step = 0
+        self.last_action = None

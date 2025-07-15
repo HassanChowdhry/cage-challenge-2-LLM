@@ -1,32 +1,38 @@
-from typing import Dict, Any, Optional
+import torch, re, json, os, logging
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from .model import LLMBackend
-import google.generativeai as genai
-import torch
-import os
-import logging
+from typing import Dict, Any, Optional
+from LLM.backend.model import LLMBackend
 
-from langgraph.prebuilt import create_react_agent
-from langgraph.checkpoint.memory import InMemorySaver
-
-#TODO: Fix this
 logger = logging.getLogger(__name__)
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class LocalHFBackend(LLMBackend):
-    def __init__(self, model_name: str = "microsoft/DialoGPT-medium"):
-        super().__init__(model_name=model_name)
-        
+    def __init__(self, hyperparams: Dict[str, Any]):
+        # Accept hyperparams dict with model_name, temperature, max_new_tokens, device
+        model_name = hyperparams.get("model_name", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+        self.temperature = hyperparams.get("temperature", 0.7)
+        self.max_tokens = hyperparams.get("max_new_tokens", 64)
+        self.device = hyperparams.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
+
+        logger.info(f"Loading HuggingFace model: {model_name} on device: {self.device}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name
-        ).to(DEVICE)
-        
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-    
+        self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
+
+        if self.tokenizer.pad_token is None: self.tokenizer.pad_token = self.tokenizer.eos_token
+
     def generate(self, prompt: str) -> str:
-        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True).to(DEVICE)
+        # For TinyLlama, we need to format the prompt as a chat conversation
+        # TinyLlama expects: <|system|>...<|user|>...<|assistant|>
+        
+        formatted_prompt = f"<|system|>You are a cybersecurity expert. Respond only with valid JSON in the format: {{\"action\": \"action_name:parameter\", \"reason\": \"explanation\"}}<|user|>{prompt}<|assistant|>"
+        
+        logger.info(formatted_prompt)
+        inputs = self.tokenizer(
+            formatted_prompt,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
+            max_length=1024,
+        ).to(self.device)
         
         with torch.no_grad():
             outputs = self.model.generate(
@@ -35,7 +41,18 @@ class LocalHFBackend(LLMBackend):
                 temperature=self.temperature,
                 do_sample=self.temperature > 0,
                 pad_token_id=self.tokenizer.eos_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
             )
         
-        generated_text = self.tokenizer.decode(outputs[0][inputs['input_ids'].shape[1]:], skip_special_tokens=True)
-        return generated_text.strip()
+        generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
+        response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
+        response = response.strip()
+        logger.info(f"Raw LLM Response: {response}")
+        
+        json_match = re.search(r'\{.*\}', response)
+        if json_match:
+            json_str = json_match.group(0)
+            json.loads(json_str) 
+            return json_str
+        else:
+            return '{"action": "Monitor", "reason": "No valid JSON found in response"}'

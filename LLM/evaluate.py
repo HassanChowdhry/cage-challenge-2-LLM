@@ -17,9 +17,9 @@ from CybORG.Agents.SimpleAgents import BlueMonitorAgent
 from CybORG.Shared.Results import Results
 import inspect
 
-from .blue_agent import LLMBlueAgent
-from .backends import create_backend
-from .prompts import get_prompt_template, PROMPT_TEMPLATES
+from LLM.blue_agent import LLMAgent, LLMPolicy
+from LLM.backend import create_backend
+from LLM.configs.prompts import PROMPT_PATH
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -49,15 +49,16 @@ class LLMAgentEvaluator:
         PATH = str(inspect.getfile(CybORG))
         self.PATH = PATH[:-10] + '/Shared/Scenarios/Scenario2.yaml'
         
-    def create_agent(self) -> LLMBlueAgent:
-        agent = LLMBlueAgent(
-            backend_type=self.config.get('backend_type', 'gemini'),
-            backend_config=self.config.get('backend_config', {}),
-            prompt_template=self.config.get('prompt_template'),
-            prompt_name=self.config.get('prompt_name', 'zero_shot'),
-            max_history_length=self.config.get('max_history_length', 10)
+    def create_agent(self, env) -> LLMAgent:
+        # env: ChallengeWrapper
+        obs_space = env.observation_space
+        agent = LLMAgent(
+            name="Blue",
+            policy=LLMPolicy,
+            obs_space=obs_space,
+            llm_config=config
         )
-        logger.info(f"Created LLM agent with backend: {self.config.get('backend_type', 'gemini')}")
+        logger.info(f"Created LLM agent with LLMPolicy and obs_space: {obs_space}")
         return agent
     
     def create_red_agent(self) -> Any:
@@ -80,38 +81,26 @@ class LLMAgentEvaluator:
         logger.info(f"Created CybORG environment with red agent: {type(red_agent).__name__}")
         return cyborg, env
     
-    def run_episode(self, agent: LLMBlueAgent, episode_id: int) -> EpisodeResult:
+    def run_episode(self, agent: LLMAgent, episode_id: int, env=None) -> EpisodeResult:
         logger.info(f"Starting episode {episode_id}")
-        
         start_time = time.time()
         actions_taken = []
         total_reward = 0.0
         steps = 0
-    
         red_agent = self.create_red_agent()
-        cyborg, env = self.create_environment(red_agent)
-        
+        cyborg, env = self.create_environment(red_agent) if env is None else (None, env)
         state = env.reset()
-        
-        for step in range(self.config.get('max_steps', 100)):
+        for step in range(100):
             action = agent.get_action(state)
             actions_taken.append(f"Step {step}: Action {action}")
-            
             next_state, reward, done, _ = env.step(action)
-            
             result = Results(observation=state, action=action, reward=reward)
-            agent.train(result)
-            
             state = next_state
             total_reward += reward
             steps += 1
-            
             if done: break
-        
         duration = time.time() - start_time
-        
         success = total_reward > 0 and steps > 0
-        
         result = EpisodeResult(
             episode_id=episode_id,
             total_reward=total_reward,
@@ -122,34 +111,32 @@ class LLMAgentEvaluator:
             duration=duration,
             red_agent_type=type(red_agent).__name__
         )
-        
         logger.info(f"Episode {episode_id} completed: reward={total_reward:.2f}, steps={steps}, success={success}")
-        
         agent.end_episode()
-        
         return result
     
-    def evaluate(self) -> EvaluationResults:
+    def evaluate(self, episodes=None, max_steps=None) -> EvaluationResults:
         logger.info("Starting LLM Blue Agent evaluation")
-        logger.info(f"Configuration: {self.config}")
-    
-        agent = self.create_agent()
-        
+        # logger.info(f"Configuration: {self.config}")
+        # Create a temp env to get obs_space
+        red_agent = self.create_red_agent()
+        _, env = self.create_environment(red_agent)
+        agent = self.create_agent(env)
         episode_results = []
-        for episode_id in range(self.config.get('episodes', 10)):
-            result = self.run_episode(agent, episode_id)
+        n_episodes = episodes if episodes is not None else self.config.get('episodes', 10)
+        max_steps = max_steps if max_steps is not None else self.config.get('max_steps', 100)
+        
+        for episode_id in range(n_episodes):
+            result = self.run_episode(agent, episode_id, env=env)
             episode_results.append(result)
-        
+            
         summary = self._calculate_summary(episode_results)
-        
         results = EvaluationResults(
             config=self.config,
             episodes=episode_results,
             summary=summary
         )
-        
         self._save_results(results)
-        
         logger.info("Evaluation completed")
         return results
     
@@ -257,37 +244,24 @@ def print_results(results: EvaluationResults):
     print("\n" + "="*60)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate LLM Blue Agent")
-    parser.add_argument("--backend", default="gemini", choices=["gemini", "local"], help="LLM backend to use")
-    parser.add_argument("--prompt", default="zero_shot", choices=list(PROMPT_TEMPLATES.keys()), help="Prompt template to use")
-    parser.add_argument("--episodes", type=int, default=100, help="Number of episodes to run")
-    parser.add_argument("--max-steps", type=int, default=100, help="Maximum steps per episode")
-    parser.add_argument("--red-agent", default="random", choices=["random", "sleep", "bline", "meander"], help="Red agent type")
-    parser.add_argument("--output", default="llm_evaluation_results.json", help="Output file for results")
-    parser.add_argument("--api-key", help="API key for the LLM backend")
-    
-    args = parser.parse_args()
-    
-    backend_config = {}
-    if args.api_key:
-        if args.backend == "gemini":
-            backend_config["api_key"] = args.api_key
-    
     config = {
-        'backend_type': args.backend,
-        'backend_config': backend_config,
-        'prompt_name': args.prompt,
-        'episodes': args.episodes,
-        'max_steps': args.max_steps,
-        'red_agent': args.red_agent,
-        'output_file': args.output,
-        'max_history_length': 10
+        'llm': "local",
+        'hyperparams': {"model_name": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "max_new_tokens": 64, "temperature": 0.9},
+        'max_steps': 100,
+        'red_agent': "random",
     }
-    
+    # config = {
+    #     'llm': "gemini",
+    #     'hyperparams': {"model_name": "gemini-2.0-flash-lite", "max_new_tokens": 32, "temperature": 0.9},
+    #     'max_steps': 100,
+    #     'red_agent': "random",
+    # }
     random.seed(0)
     np.random.seed(0)
-    
-    evaluator = LLMAgentEvaluator(config)
-    results = evaluator.evaluate()
-    
-    print_results(results)
+    # for n_episodes in [30, 50, 100]:
+    for n_episodes in [5]:
+        print(f"\n{'='*20} Running evaluation for {n_episodes} episodes {'='*20}")
+        config['episodes'] = n_episodes
+        evaluator = LLMAgentEvaluator(config)
+        results = evaluator.evaluate(episodes=n_episodes)
+        print_results(results)
