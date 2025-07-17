@@ -1,8 +1,8 @@
 from typing import Dict, Any, List, Optional, TypedDict, Annotated
 import logging, os, yaml, json
 from dataclasses import dataclass, field
+from prettytable import PrettyTable
 
-# from ray.rllib.policy.policy import Policy
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
@@ -20,7 +20,11 @@ base_path = os.path.dirname(__file__)
 base_prompt_path = os.path.join(base_path, "configs", "prompts", PROMPT_PATH)
 
 CAGE2_HOSTS = [
-    "User0", "User1", "User2", "Enterprise0", "Enterprise1", "Enterprise2", "Operational0"
+    "User0", "User1", "User2", "User3", "User4", 
+    "Enterprise0", "Enterprise1", "Enterprise2", 
+    "Op_Host0", "Op_Host1", "Op_Host2",
+    "Op_Server0",
+    "Defender",
 ]
 CAGE2_ACTIONS = [
     "Monitor",
@@ -71,16 +75,12 @@ class LLMPolicy:
         self.state = BlueAgentState(action_mapping=self.action_mapping)
 
     def get_action(self, observation, action_space=None, hidden=None):
-        obs_text = self._observation_to_text(observation)
+        obs_text = self._vector_to_table(observation)
         self.state.current_observation = obs_text
         self.state.episode_step += 1
         
-        # Run the workflow graph
         output_state = self.graph.invoke(self.state)
-        # logger.info(f"Output state type: {type(output_state)}")
-        # logger.info(f"Output state: {output_state}")
         
-        # Return the selected action (index or string as required by CybORG)
         if hasattr(output_state, 'selected_action'):
             return output_state.selected_action
         elif isinstance(output_state, dict) and 'selected_action' in output_state:
@@ -94,25 +94,25 @@ class LLMPolicy:
     
     def _build_graph(self):
         logger.info("Build LangGraph Agent")
-
-        workflow = StateGraph(BlueAgentState)
+        # TODO: Add an observation formatter
+        graph = StateGraph(BlueAgentState)
         
         # Add nodes
-        workflow.add_node("format_prompt", self._format_prompt_node)
-        workflow.add_node("call_llm", self._call_llm_node)
-        workflow.add_node("parse_action", self._parse_action_node)
-        workflow.add_node("update_state", self._update_state_node)
+        graph.add_node("format_prompt", self._format_prompt_node)
+        graph.add_node("call_llm", self._call_llm_node)
+        graph.add_node("parse_action", self._parse_action_node)
+        graph.add_node("update_state", self._update_state_node)
         
         # Set entry point
-        workflow.set_entry_point("format_prompt")
+        graph.set_entry_point("format_prompt")
         
         # Add edges
-        workflow.add_edge("format_prompt", "call_llm")
-        workflow.add_edge("call_llm", "parse_action")
-        workflow.add_edge("parse_action", "update_state")
-        workflow.add_edge("update_state", END)
+        graph.add_edge("format_prompt", "call_llm")
+        graph.add_edge("call_llm", "parse_action")
+        graph.add_edge("parse_action", "update_state")
+        graph.add_edge("update_state", END)
         
-        return workflow.compile()
+        return graph.compile()
     
     def _format_prompt_node(self, state: BlueAgentState) -> BlueAgentState:
         try:
@@ -123,9 +123,9 @@ class LLMPolicy:
             prompt_template = ""
             
         # # Format the prompt
-        # prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
-        # if state.history:
-        #     prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
+        if state.history:
+            prompt += f"\n# HISTORY\n" + "\n".join(state.history)
         
         # Update the current observation with the formatted prompt
         prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
@@ -143,25 +143,70 @@ class LLMPolicy:
             logger.info("LLM response received")
         except Exception as e:
             logger.error(f"LLM backend error: {e}")
-            response = "{\"action\": \"Monitor\", \"reason\": \"Fallback action due to LLM error\"}"
-        
+            response = '{"action": "Monitor", "reason": "No valid JSON found in response"}'
+
         state.raw_llm_output = response
         return state
             
     def _parse_action_node(self, state: BlueAgentState) -> BlueAgentState:
         llm_output = state.raw_llm_output if state.raw_llm_output else ""
         action = None
-        try:
-            parsed = json.loads(llm_output)
-            action_str = parsed.get("action", "Monitor")
-            # Map action string to action index if needed
-            action = self.action_mapping.get(action_str, 0)  # Default to 0 if not found
-        except Exception as e:
-            logger.error(f"Failed to parse LLM output: {e}")
-            action = 0  # Default to Monitor
-        
+        # TODO: Parse the LLM output and return the action
+        # action = self.action_mapping.get(action_str, 0)  # Default to 0 if not found
+        # logger.info(f"Parsed action: {action}")
         state.selected_action = action
         return state
+    
+    def _vector_to_table(self, observation):
+        """
+        observation: the numpy array returned by the environment
+        """
+        HOST_INFO = [
+            'Defender',
+            'Enterprise0',
+            'Enterprise1',
+            'Enterprise2',
+            'Op_Host0',
+            'Op_Host1',
+            'Op_Host2',
+            'Op_Server0',
+            'User0',
+            'User1',
+            'User2',
+            'User3',
+            'User4',
+        ]
+        table = PrettyTable(['Hostname', 'Activity', 'Compromised'])
+        idx = 0
+        for host in HOST_INFO:
+            # Activity: 2 bits
+            activity_bits = observation[idx:idx+2]
+            if (activity_bits == [0,0]).all():
+                activity = 'None'
+            elif (activity_bits == [1,0]).all():
+                activity = 'Scan'
+            elif (activity_bits == [1,1]).all():
+                activity = 'Exploit'
+            else:
+                activity = 'Unknown'
+            idx += 2
+
+            # Compromised: 2 bits
+            comp_bits = observation[idx:idx+2]
+            if (comp_bits == [0,0]).all():
+                compromised = 'No'
+            elif (comp_bits == [1,0]).all():
+                compromised = 'Unknown'
+            elif (comp_bits == [0,1]).all():
+                compromised = 'User'
+            elif (comp_bits == [1,1]).all():
+                compromised = 'Privileged'
+            else:
+                compromised = 'Unknown'
+            idx += 2
+
+            table.add_row([host, activity, compromised])
+        return table
     
     def _observation_to_text(self, observation):
         # Convert numpy array to a more readable format

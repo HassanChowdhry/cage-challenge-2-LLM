@@ -3,3 +3,4 @@ tests/
 examples/
 .env
 Models/
+*/__pycache__/

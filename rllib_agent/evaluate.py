@@ -8,9 +8,14 @@ import numpy as np
 import json
 from collections import defaultdict
 import time
+import logging
 
 from .envs.random_attack_wrapper import RandomAttackWrapper
 from .configs import get_config
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 def env_creator(env_config):
     """
@@ -27,7 +32,7 @@ def env_creator(env_config):
 def register_environments():
     """Register the custom environment with RLlib"""
     register_env("RandomAttackEnv", env_creator)
-    print("✓ Registered RandomAttackEnv with RLlib")
+    logger.info("✓ Registered RandomAttackEnv with RLlib")
 
 def load_agent(checkpoint_path, config):
     """
@@ -51,7 +56,7 @@ def load_agent(checkpoint_path, config):
     
     # Restore from checkpoint
     agent.restore(checkpoint_path)
-    print(f"✓ Loaded agent from checkpoint: {checkpoint_path}")
+    logger.info(f"✓ Loaded agent from checkpoint: {checkpoint_path}")
     
     return agent
 
@@ -106,7 +111,7 @@ def evaluate_agent(agent, config, num_episodes=100, render=False):
     Returns:
         Dictionary with evaluation results
     """
-    print(f"🔍 Evaluating agent over {num_episodes} episodes...")
+    logger.info(f"🔍 Evaluating agent over {num_episodes} episodes...")
     
     # Create environment
     env = RandomAttackWrapper(config.get('env_config', {}))
@@ -119,7 +124,7 @@ def evaluate_agent(agent, config, num_episodes=100, render=False):
     }
     
     for episode in range(num_episodes):
-        print(f"Episode {episode + 1}/{num_episodes}", end='\r')
+        logger.debug(f"Episode {episode + 1}/{num_episodes}")
         
         # Evaluate episode
         episode_result = evaluate_episode(
@@ -156,7 +161,7 @@ def evaluate_agent(agent, config, num_episodes=100, render=False):
         }
     
     env.close()
-    print(f"\n✅ Evaluation completed!")
+    logger.info("✅ Evaluation completed!")
     
     return results
 
@@ -187,7 +192,7 @@ def save_results(results, output_path):
     with open(output_path, 'w') as f:
         json.dump(results_json, f, indent=2)
     
-    print(f"💾 Results saved to: {output_path}")
+    logger.info(f"💾 Results saved to: {output_path}")
 
 def print_summary(results):
     """
@@ -198,21 +203,21 @@ def print_summary(results):
     """
     summary = results['summary']
     
-    print("\n" + "="*50)
-    print("📊 EVALUATION SUMMARY")
-    print("="*50)
-    print(f"Total Episodes: {summary['total_episodes']}")
-    print(f"Mean Reward: {summary['mean_reward']:.2f} ± {summary['std_reward']:.2f}")
-    print(f"Reward Range: [{summary['min_reward']:.2f}, {summary['max_reward']:.2f}]")
+    logger.info("\n" + "="*50)
+    logger.info("📊 EVALUATION SUMMARY")
+    logger.info("="*50)
+    logger.info(f"Total Episodes: {summary['total_episodes']}")
+    logger.info(f"Mean Reward: {summary['mean_reward']:.2f} ± {summary['std_reward']:.2f}")
+    logger.info(f"Reward Range: [{summary['min_reward']:.2f}, {summary['max_reward']:.2f}]")
     
-    print("\n📈 Attack Type Breakdown:")
+    logger.info("\n📈 Attack Type Breakdown:")
     for attack_type, stats in summary['attack_type_stats'].items():
-        print(f"  {attack_type.upper()}:")
-        print(f"    Episodes: {stats['count']}")
-        print(f"    Mean Reward: {stats['mean_reward']:.2f} ± {stats['std_reward']:.2f}")
-        print(f"    Range: [{stats['min_reward']:.2f}, {stats['max_reward']:.2f}]")
+        logger.info(f"  {attack_type.upper()}:")
+        logger.info(f"    Episodes: {stats['count']}")
+        logger.info(f"    Mean Reward: {stats['mean_reward']:.2f} ± {stats['std_reward']:.2f}")
+        logger.info(f"    Range: [{stats['min_reward']:.2f}, {stats['max_reward']:.2f}]")
     
-    print("="*50)
+    logger.info("="*50)
 
 def main():
     """Main evaluation function"""
@@ -245,12 +250,22 @@ def main():
         default="default",
         help="Configuration name to use"
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Logging level"
+    )
     
     args = parser.parse_args()
     
+    # Set logging level
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
+    
     # Check if checkpoint exists
     if not os.path.exists(args.checkpoint_path):
-        print(f"❌ Checkpoint not found: {args.checkpoint_path}")
+        logger.error(f"❌ Checkpoint not found: {args.checkpoint_path}")
         return
     
     # Get configuration
@@ -273,7 +288,7 @@ def main():
     # Save results
     save_results(results, args.output)
     
-    print("🎉 Evaluation completed!")
+    logger.info("🎉 Evaluation completed!")
 
 if __name__ == "__main__":
     main() 

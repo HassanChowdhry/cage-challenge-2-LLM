@@ -1,7 +1,7 @@
 import torch
 from CybORG.Agents import BaseAgent
 from CybORG.Shared.Results import Results
-from PPO.PPO import PPO
+from Agents.PPO.PPO import PPO
 from Agents.ICM import ICM
 import torch.nn.functional as F
 

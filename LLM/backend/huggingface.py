@@ -22,12 +22,10 @@ class LocalHFBackend(LLMBackend):
     def generate(self, prompt: str) -> str:
         # For TinyLlama, we need to format the prompt as a chat conversation
         # TinyLlama expects: <|system|>...<|user|>...<|assistant|>
-        
-        formatted_prompt = f"<|system|>You are a cybersecurity expert. Respond only with valid JSON in the format: {{\"action\": \"action_name:parameter\", \"reason\": \"explanation\"}}<|user|>{prompt}<|assistant|>"
-        
-        logger.info(formatted_prompt)
+
+        # logger.info(f"Prompt: {prompt}")
         inputs = self.tokenizer(
-            formatted_prompt,
+            prompt,
             return_tensors="pt",
             padding=True,
             truncation=True,
@@ -47,12 +45,14 @@ class LocalHFBackend(LLMBackend):
         generated_tokens = outputs[0][inputs['input_ids'].shape[1]:]
         response = self.tokenizer.decode(generated_tokens, skip_special_tokens=True)
         response = response.strip()
-        logger.info(f"Raw LLM Response: {response}")
+        # logger.info(f"Raw LLM Response: {response}")
         
         json_match = re.search(r'\{.*\}', response)
         if json_match:
             json_str = json_match.group(0)
-            json.loads(json_str) 
+            json.loads(json_str)
+            logger.info(f"LLM Response: {json_str}")
             return json_str
         else:
+            logger.error(f"No valid JSON found in response {response}")
             return '{"action": "Monitor", "reason": "No valid JSON found in response"}'
