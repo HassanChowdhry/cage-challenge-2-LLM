@@ -66,7 +66,8 @@ class LLMAgentEvaluator:
         red_agent = self.create_red_agent()
         cyborg, env = self.create_environment(red_agent) if env is None else (None, env)
         state = env.reset()
-        
+        # pprint([action for action in actions if actions[action]])
+
         for step in range(100):
             action = agent.get_action(state)
             actions_taken.append(f"Step {step}: Action {action}")

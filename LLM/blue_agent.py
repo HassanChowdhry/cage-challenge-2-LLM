@@ -13,8 +13,13 @@ from CybORG.Shared.Results import Results
 from LLM.backend import LLMBackend, create_backend
 from LLM.configs.prompts import PROMPT_PATH
 from LLM.configs.utils import ConfigLoader
+from LLM.configs.action_to_index import ACTION_MAPPING
 
-# Base LLMAgent, backend_config, create_backend, _build_workflow_graph
+from CybORG.Shared.Actions import (
+    Analyse, Restore, Remove, Monitor,
+    DecoyApache, DecoyFemitter, DecoyHarakaSMPT, DecoySmss, DecoySSHD, DecoySvchost, DecoyTomcat
+)
+
 logger = logging.getLogger(__name__)
 base_path = os.path.dirname(__file__)
 base_prompt_path = os.path.join(base_path, "configs", "prompts", PROMPT_PATH)
@@ -122,23 +127,17 @@ class LLMPolicy:
             logger.error(f"Failed to load prompt template: {e}")
             prompt_template = ""
             
-        # # Format the prompt
         prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
-        if state.history:
-            prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        if state.history: prompt += f"\n# HISTORY\n" + "\n".join(state.history)
         
-        # Update the current observation with the formatted prompt
         prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
-        if state.history:
-            prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        if state.history: prompt += f"\n# HISTORY\n" + "\n".join(state.history)
         state.current_observation = prompt
         return state
     
     def _call_llm_node(self, state: BlueAgentState) -> BlueAgentState:
-        # Get the prompt from the format_prompt node
         prompt = state.current_observation
         try:
-            # Use the backend to generate a response
             response = self.backend.generate(prompt)
             logger.info("LLM response received")
         except Exception as e:
@@ -150,12 +149,36 @@ class LLMPolicy:
             
     def _parse_action_node(self, state: BlueAgentState) -> BlueAgentState:
         llm_output = state.raw_llm_output if state.raw_llm_output else ""
-        action = None
-        # TODO: Parse the LLM output and return the action
+        
+        try:
+            llm_out = json.loads(llm_output)
+            action = llm_out["action"]
+            reason = llm_out["reason"]  
+            
+            if action == "Monitor":
+                action_idx = ACTION_MAPPING.get(action, 0)
+                state.selected_action = action_idx
+                return state
+            
+            action_str = action.split("host:")[0].strip()
+            host = action.split("host:")[1].strip()
+            action = action_str + " " + host
+            action_idx = ACTION_MAPPING.get(action, 0)
+            state.selected_action = action_idx
+            return state
+        except Exception as e:
+            logger.error(f"Failed to parse LLM output: {e}")
+            state.selected_action = 0
+            return state
+
+
+        # action = llm_output[("action:") # extraction of the action and reason
+        # logger.info(f"Parsed action: {action}")
+        # logger.info(f"Parsed action: {action}")
         # action = self.action_mapping.get(action_str, 0)  # Default to 0 if not found
         # logger.info(f"Parsed action: {action}")
-        state.selected_action = action
-        return state
+        # state.selected_action = action
+        # return state
     
     def _vector_to_table(self, observation):
         """
@@ -178,6 +201,7 @@ class LLMPolicy:
         ]
         table = PrettyTable(['Hostname', 'Activity', 'Compromised'])
         idx = 0
+
         for host in HOST_INFO:
             # Activity: 2 bits
             activity_bits = observation[idx:idx+2]

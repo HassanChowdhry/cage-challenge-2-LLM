@@ -1,0 +1,35 @@
+{
+  "config": {
+    "backend_type": null,
+    "prompt_name": null,
+    "episodes": 1,
+    "max_steps": 100,
+    "red_agent": "random"
+  },
+  "summary": {
+    "total_episodes": 1,
+    "avg_reward": -647.0999999999995,
+    "std_reward": 0,
+    "min_reward": -647.0999999999995,
+    "max_reward": -647.0999999999995,
+    "avg_steps": 100,
+    "avg_duration": 19400.092427015305,
+    "total_duration": 19400.092427015305,
+    "red_agent_breakdown": {
+      "type": {
+        "count": 1,
+        "avg_reward": -647.0999999999995,
+        "success_rate": 0.0
+      }
+    }
+  },
+  "episodes": [
+    {
+      "episode_id": 0,
+      "total_reward": -647.0999999999995,
+      "steps": 100,
+      "duration": 19400.092427015305,
+      "red_agent_type": "type"
+    }
+  ]
+}
