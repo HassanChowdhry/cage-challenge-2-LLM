@@ -6,3 +6,12 @@ Models/
 */__pycache__/
 Agents/
 cage-challenge-2/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
