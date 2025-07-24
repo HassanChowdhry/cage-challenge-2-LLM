@@ -4,3 +4,5 @@ examples/
 .env
 Models/
 */__pycache__/
+Agents/
+cage-challenge-2/

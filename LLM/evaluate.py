@@ -46,15 +46,14 @@ class LLMAgentEvaluator:
         elif red_agent_type == 'meander':
             return RedMeanderAgent()
         elif red_agent_type == 'random':
-            return random.choice([RedMeanderAgent])
-            # return random.choice([B_lineAgent, RedMeanderAgent, SleepAgent])
+            # return random.choice([RedMeanderAgent])
+            return random.choice([B_lineAgent, RedMeanderAgent, SleepAgent])
         else:
             return SleepAgent()
     
     def create_environment(self, red_agent) -> tuple:
         cyborg = CybORG(self.PATH, 'sim', agents={'Red': red_agent})
         env = ChallengeWrapper(env=cyborg, agent_name="Blue")
-        logger.info(f"Created CybORG environment with red agent: {type(red_agent).__name__}")
         return cyborg, env
     
     def run_episode(self, agent: LLMAgent, episode_id: int, env=None) -> EpisodeResult:
