@@ -1,7 +1,7 @@
 import torch, re, json, os, logging
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from typing import Dict, Any, Optional
-from LLM.backend.model import LLMBackend
+from .model import LLMBackend
 
 logger = logging.getLogger(__name__)
 

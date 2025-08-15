@@ -1,7 +1,7 @@
 import logging
-from LLM.backend.gemini import GeminiBackend
-from LLM.backend.huggingface import LocalHFBackend
-from LLM.backend.model import LLMBackend
+from .gemini import GeminiBackend
+from .huggingface import LocalHFBackend
+from .model import LLMBackend
 
 logger = logging.getLogger(__name__)
 

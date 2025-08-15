@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import List, Dict, Any
 import json
 import statistics
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +16,20 @@ class EpisodeResult:
     final_state: str
     duration: float
     red_agent_type: str
+    max_steps: int = 100  # Add max_steps to track time step configuration
+
+@dataclass
+class TimeStepResult:
+    max_steps: int
+    episodes: List[EpisodeResult]
+    summary: Dict[str, Any]
 
 @dataclass
 class EvaluationResults:
     config: Dict[str, Any]
     episodes: List[EpisodeResult]
     summary: Dict[str, Any]
+    time_step_results: List[TimeStepResult] = None  # Add time step breakdown
     
 def save_results(config, results: EvaluationResults):
     try:
@@ -40,11 +49,32 @@ def save_results(config, results: EvaluationResults):
                     "total_reward": ep.total_reward,
                     "steps": ep.steps,
                     "duration": ep.duration,
-                    "red_agent_type": ep.red_agent_type
+                    "red_agent_type": ep.red_agent_type,
+                    "max_steps": ep.max_steps
                 }
                 for ep in results.episodes
             ]
         }
+        
+        # Add time step breakdown if available
+        if results.time_step_results:
+            data["time_step_breakdown"] = [
+                {
+                    "max_steps": tsr.max_steps,
+                    "summary": tsr.summary,
+                    "episodes": [
+                        {
+                            "episode_id": ep.episode_id,
+                            "total_reward": ep.total_reward,
+                            "steps": ep.steps,
+                            "duration": ep.duration,
+                            "red_agent_type": ep.red_agent_type
+                        }
+                        for ep in tsr.episodes
+                    ]
+                }
+                for tsr in results.time_step_results
+            ]
         
         with open(output_file, 'w') as f:
             json.dump(data, f, indent=2)
@@ -90,6 +120,24 @@ def calculate_summary(episode_results: List[EpisodeResult]) -> Dict[str, Any]:
     }
     
     return summary
+
+def calculate_time_step_summary(episode_results: List[EpisodeResult]) -> List[TimeStepResult]:
+    """Group episodes by max_steps and calculate summary for each time step"""
+    time_step_groups = defaultdict(list)
+    
+    for ep in episode_results:
+        time_step_groups[ep.max_steps].append(ep)
+    
+    time_step_results = []
+    for max_steps, episodes in time_step_groups.items():
+        summary = calculate_summary(episodes)
+        time_step_results.append(TimeStepResult(
+            max_steps=max_steps,
+            episodes=episodes,
+            summary=summary
+        ))
+    
+    return time_step_results
         
 def print_results(results: EvaluationResults):
     print("\n" + "="*60)
@@ -102,7 +150,7 @@ def print_results(results: EvaluationResults):
     print(f"  Episodes: {results.config.get('episodes', 10)}")
     print(f"  Red Agent: {results.config.get('red_agent', 'random')}")
     
-    print(f"\nSummary:")
+    print(f"\nOverall Summary:")
     print(f"  Total Episodes: {results.summary['total_episodes']}")
     print(f"  Average Reward: {results.summary['avg_reward']:.2f}")
     print(f"  Reward Std Dev: {results.summary['std_reward']:.2f}")
@@ -116,5 +164,20 @@ def print_results(results: EvaluationResults):
         for agent_type, stats in results.summary['red_agent_breakdown'].items():
             print(f"  {agent_type}: {stats['count']} episodes, "
                   f"avg reward: {stats['avg_reward']:.2f}")
+    
+    # Print time step breakdown if available
+    if results.time_step_results:
+        print(f"\nTime Step Breakdown:")
+        for tsr in results.time_step_results:
+            print(f"\n  Max Steps: {tsr.max_steps}")
+            print(f"    Episodes: {tsr.summary['total_episodes']}")
+            print(f"    Avg Reward: {tsr.summary['avg_reward']:.2f}")
+            print(f"    Avg Steps: {tsr.summary['avg_steps']:.1f}")
+            print(f"    Avg Duration: {tsr.summary['avg_duration']:.2f}s")
+            
+            if 'red_agent_breakdown' in tsr.summary:
+                for agent_type, stats in tsr.summary['red_agent_breakdown'].items():
+                    print(f"    {agent_type}: {stats['count']} episodes, "
+                          f"avg reward: {stats['avg_reward']:.2f}")
     
     print("\n" + "="*60)

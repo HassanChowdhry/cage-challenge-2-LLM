@@ -1,24 +1,15 @@
-from typing import Dict, Any, List, Optional, TypedDict, Annotated
+from typing import Dict, Any, List, Annotated
 import logging, os, yaml, json
 from dataclasses import dataclass, field
 from prettytable import PrettyTable
 
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 
-from CybORG.Agents import BaseAgent
-from CybORG.Shared.Results import Results
-
-from LLM.backend import LLMBackend, create_backend
-from LLM.configs.prompts import PROMPT_PATH
-from LLM.configs.utils import ConfigLoader
-from LLM.configs.action_to_index import ACTION_MAPPING
-
-from CybORG.Shared.Actions import (
-    Analyse, Restore, Remove, Monitor,
-    DecoyApache, DecoyFemitter, DecoyHarakaSMPT, DecoySmss, DecoySSHD, DecoySvchost, DecoyTomcat
-)
+from backend import create_backend
+from configs.prompts import PROMPT_PATH
+from configs.utils import ConfigLoader
+from configs.action_to_index import ACTION_MAPPING
 
 logger = logging.getLogger(__name__)
 base_path = os.path.dirname(__file__)
@@ -81,6 +72,7 @@ class LLMPolicy:
 
     def get_action(self, observation, action_space=None, hidden=None):
         obs_text = self._vector_to_table(observation)
+        print(obs_text)
         self.state.current_observation = obs_text
         self.state.episode_step += 1
         
@@ -99,7 +91,6 @@ class LLMPolicy:
     
     def _build_graph(self):
         logger.info("Build LangGraph Agent")
-        # TODO: Add an observation formatter
         graph = StateGraph(BlueAgentState)
         
         # Add nodes
@@ -130,8 +121,8 @@ class LLMPolicy:
         prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
         if state.history: prompt += f"\n# HISTORY\n" + "\n".join(state.history)
         
-        prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
-        if state.history: prompt += f"\n# HISTORY\n" + "\n".join(state.history)
+        # prompt = f"{prompt_template}\n\n# OBSERVATION\n{state.current_observation}\n"
+        # if state.history: prompt += f"\n# HISTORY\n" + "\n".join(state.history)
         state.current_observation = prompt
         return state
     
