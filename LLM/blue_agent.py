@@ -13,7 +13,7 @@ from configs.action_to_index import ACTION_MAPPING
 
 logger = logging.getLogger(__name__)
 base_path = os.path.dirname(__file__)
-base_prompt_path = os.path.join(base_path, "configs", "prompts", PROMPT_PATH)
+# base_prompt_path = os.path.join(base_path, "configs", "prompts", PROMPT_PATH)
 
 CAGE2_HOSTS = [
     "User0", "User1", "User2", "User3", "User4", 
@@ -62,6 +62,7 @@ class LLMPolicy:
         observation_space, action_space, llm_config
     ):
         self.backend = create_backend(llm_config['llm'], llm_config['hyperparams'])
+        self.llm_config = llm_config
         
         # CAGE Challenge 2 Specific Things
         self.action_mapping = _build_action_mapping()
@@ -112,7 +113,9 @@ class LLMPolicy:
     
     def _format_prompt_node(self, state: BlueAgentState) -> BlueAgentState:
         try:
-            prompts = ConfigLoader.load_prompts(base_prompt_path)
+            prompt_name = self.llm_config.get('prompt_name', 'base')
+            prompt_path = os.path.join(base_path, "configs", "prompts", f"{prompt_name}.yaml")
+            prompts = ConfigLoader.load_prompts(prompt_path)
             prompt_template = prompts[0]["content"] if prompts else ""
         except Exception as e:
             logger.error(f"Failed to load prompt template: {e}")
